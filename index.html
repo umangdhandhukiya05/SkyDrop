@@ -4,10 +4,81 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SkyDrop</title>
+    <meta name="description" content="SkyDrop — 3D skydiving precision landing game" />
+    <title>SKYDROP</title>
   </head>
   <body>
-    <div id="app"></div>
+    <!-- Initial Loading screen -->
+    <div id="loading-screen">
+      <h1>SKYDROP</h1>
+      <p>PREPARING RUNWAY & TARGETS...</p>
+      <div class="loader-bar-track">
+        <div class="loader-bar-fill"></div>
+      </div>
+    </div>
+
+    <!-- Three.js Canvas -->
+    <div id="app">
+      <canvas></canvas>
+
+      <!-- Cinematic Game Menu Overlay -->
+      <div id="ui-overlay">
+        <div class="title-container">
+          <h1 class="main-title">SKYDROP</h1>
+        </div>
+
+        <div class="actions-container">
+          <button id="start-button" class="start-btn">START</button>
+        </div>
+      </div>
+
+      <!-- In-Game Skydiving HUD with Landing Target Telemetry -->
+      <div id="gameplay-hud">
+        <div class="hud-card">
+          <div class="target-indicator">
+            <span class="crosshair-icon">🎯</span>
+            <div class="target-info">
+              <span class="target-label">LANDING BULLSEYE</span>
+              <span id="hud-target-dist" class="target-dist">--- m</span>
+            </div>
+          </div>
+          <div class="alt-indicator">
+            <span class="alt-label">ALTITUDE</span>
+            <span id="hud-alt" class="alt-val">--- m</span>
+          </div>
+          <div class="hud-divider"></div>
+          <div class="hud-keys">
+            <div><span class="key-badge">W / S</span> Pitch Down / Glide</div>
+            <div><span class="key-badge">A / D</span> Steer Left / Right</div>
+            <div><span class="key-badge">SPACE</span> Dive Bomb (Fast)</div>
+            <div><span class="key-badge">SHIFT</span> Airbrake / Flare</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Landing Score & Target Result Modal -->
+      <div id="score-overlay">
+        <div class="score-card">
+          <div id="score-rating" class="score-rating">PERFECT BULLSEYE!</div>
+          <div id="score-points" class="score-points">1000 PTS</div>
+          <div id="score-distance" class="score-distance">0.0m from center (Bullseye)</div>
+          <div class="score-divider"></div>
+          <button id="restart-button" class="restart-btn">PLAY AGAIN</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.js"></script>
+
+    <script>
+      window.addEventListener('load', () => {
+        setTimeout(() => {
+          const loadingScreen = document.getElementById('loading-screen')
+          const uiOverlay = document.getElementById('ui-overlay')
+          if (loadingScreen) loadingScreen.classList.add('hidden')
+          if (uiOverlay) uiOverlay.classList.add('visible')
+        }, 1200)
+      })
+    </script>
   </body>
 </html>
