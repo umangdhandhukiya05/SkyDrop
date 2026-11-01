@@ -6,6 +6,7 @@ import Renderer from './system/Renderer.js'
 import Loader from './system/Loader.js'
 import Controls from './system/Controls.js'
 import Physics from './system/Physics.js'
+import AudioManager from './system/AudioManager.js'
 import World from './world/World.js'
 
 export default class Experience {
@@ -26,11 +27,14 @@ export default class Experience {
     this.time = new Time()
     this.scene = new THREE.Scene()
 
-    // Fog — gives depth to the sky scene
-    this.scene.fog = new THREE.FogExp2(0x87ceeb, 0.0006)
+    // Fog — gives realistic high-altitude atmospheric haze while keeping the island visible from above
+    this.scene.fog = new THREE.FogExp2(0x87ceeb, 0.00018)
 
-    // Keyboard controls system (WASD, Space, Shift)
-    this.controls = new Controls()
+    // Web Audio API Procedural Sound Engine
+    this.audio = new AudioManager(this)
+
+    // Keyboard & mouse controls system (WASD, Mouse Aim, PUBG Free-Look)
+    this.controls = new Controls(this.canvas)
 
     // Physics system powered by Rapier3D
     this.physics = new Physics()
@@ -54,8 +58,11 @@ export default class Experience {
   _update() {
     const delta = this.time.delta
     if (this.physics) this.physics.update(delta)
-    this.camera.update()
+    // World (plane & character movement) MUST update FIRST so camera follows the current frame position with zero lag
     this.world.update()
+    this.camera.update()
     this.renderer.update()
+
+    if (this.controls) this.controls.resetMouseDelta()
   }
 }

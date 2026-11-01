@@ -17,6 +17,8 @@ export default class Renderer {
       canvas: this.canvas,
       antialias: true,
       alpha: false,
+      logarithmicDepthBuffer: true,
+      powerPreference: 'high-performance'
     })
 
     this.instance.setSize(this.sizes.width, this.sizes.height)

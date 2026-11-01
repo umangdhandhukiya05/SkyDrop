@@ -28,14 +28,16 @@ export default class Physics {
     // Dynamic rigid body for the skydiving character
     const rigidBodyDesc = this.RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(x, y, z)
-      .setLinearDamping(0.8) // Air resistance damping
-      .setAngularDamping(2.0)
+      .setLinearDamping(0.0) // Direct aerodynamic velocity authority
+      .setAngularDamping(0.0)
       .lockRotations() // Lock rotations so animation & controls handle orientation
 
     const rigidBody = this.world.createRigidBody(rigidBodyDesc)
 
-    // CYLINDER collider for character: half-height 0.9m, radius 0.45m (cylinder along Y axis)
-    const colliderDesc = this.RAPIER.ColliderDesc.cylinder(0.9, 0.45)
+    // CYLINDER collider for character: half-height 0.8m, radius 0.4m.
+    // Offset translation by (0, 0.8, 0) so the bottom of the cylinder aligns EXACTLY with y = 0 (the character's feet)
+    const colliderDesc = this.RAPIER.ColliderDesc.cylinder(0.8, 0.4)
+      .setTranslation(0, 0.8, 0)
       .setRestitution(0.0) // No bouncing on impact
       .setFriction(0.8)
 

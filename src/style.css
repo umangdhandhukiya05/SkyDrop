@@ -182,30 +182,37 @@ canvas {
 /* ── In-Game Target & Telemetry HUD ── */
 #gameplay-hud {
   position: absolute;
-  top: 1.5rem;
-  right: 1.5rem;
+  inset: 0;
   z-index: 15;
   pointer-events: none;
   opacity: 0;
-  transform: translateY(-10px);
-  transition: opacity 0.8s ease, transform 0.8s ease;
+  transition: opacity 0.6s ease;
 }
 
 #gameplay-hud.visible {
   opacity: 1;
-  transform: translateY(0);
 }
 
 .hud-card {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
   background: rgba(9, 23, 36, 0.88);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 222, 23, 0.4);
   border-radius: 14px;
-  padding: 1.2rem 1.5rem;
+  padding: 1.1rem 1.4rem;
   color: #ffffff;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-  min-width: 260px;
+  min-width: 240px;
+  pointer-events: auto;
+  transform: translateY(-8px);
+  transition: transform 0.6s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+}
+
+#gameplay-hud.visible .hud-card {
+  transform: translateY(0);
 }
 
 .target-indicator {
@@ -245,7 +252,7 @@ canvas {
   background: rgba(255, 255, 255, 0.08);
   padding: 0.4rem 0.8rem;
   border-radius: 6px;
-  margin-bottom: 0.9rem;
+  margin-bottom: 0.6rem;
 }
 
 .alt-label {
@@ -261,29 +268,126 @@ canvas {
   color: #38bdf8;
 }
 
-.hud-divider {
-  height: 1px;
-  background: rgba(255, 255, 255, 0.15);
-  margin-bottom: 0.8rem;
+.rings-indicator {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 170, 0, 0.15);
+  border: 1px solid rgba(255, 170, 0, 0.4);
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  margin-bottom: 0;
+}
+
+.rings-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.12em;
+  color: #ffde17;
+  font-weight: 700;
+}
+
+.rings-val {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #ffaa00;
+}
+
+.ring-popup {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.6);
+  z-index: 25;
+  background: linear-gradient(135deg, rgba(255, 140, 0, 0.95), rgba(255, 215, 0, 0.95));
+  color: #091724;
+  font-family: 'Montserrat', sans-serif;
+  font-weight: 900;
+  font-size: clamp(1.1rem, 2.2vw, 1.6rem);
+  letter-spacing: 0.15em;
+  padding: 0.8rem 2.2rem;
+  border-radius: 40px;
+  border: 3px solid #ffffff;
+  box-shadow: 0 10px 30px rgba(255, 140, 0, 0.6), 0 0 20px #ffffff;
+  pointer-events: none;
+  opacity: 0;
+  white-space: nowrap;
+}
+
+.ring-popup.animate {
+  animation: ringCollectPop 1.2s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+}
+
+@keyframes ringCollectPop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -20%) scale(0.5);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1.15);
+  }
+  40% {
+    transform: translate(-50%, -50%) scale(1.0);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -80%) scale(0.95);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -120%) scale(0.85);
+  }
+}
+
+/* ── Bottom-Left Controls Guide Card ── */
+.hud-controls-card {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 1.5rem;
+  z-index: 15;
+  background: rgba(9, 23, 36, 0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 222, 23, 0.35);
+  border-radius: 14px;
+  padding: 0.9rem 1.25rem;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  transform: translateY(10px);
+  opacity: 0;
+  transition: transform 0.6s cubic-bezier(0.18, 0.89, 0.32, 1.28), opacity 0.6s ease;
+  user-select: none;
+}
+
+#gameplay-hud.visible .hud-controls-card {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .hud-keys {
   font-family: 'Inter', sans-serif;
   font-size: 0.76rem;
-  line-height: 1.8;
-  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.85;
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.hud-keys > div {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
 }
 
 .key-badge {
   display: inline-block;
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  padding: 0.08rem 0.4rem;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  padding: 0.1rem 0.42rem;
   border-radius: 4px;
   font-weight: 800;
   color: #ffde17;
-  margin-right: 0.4rem;
   font-size: 0.72rem;
+  margin-right: 0.5rem;
+  letter-spacing: 0.03em;
 }
 
 /* ── Landing Score Result Modal ── */
@@ -304,7 +408,16 @@ canvas {
 
 #score-overlay.visible {
   opacity: 1;
-  pointer-events: auto;
+  pointer-events: auto !important;
+  cursor: default !important;
+}
+
+#score-overlay.visible * {
+  cursor: default !important;
+}
+
+#score-overlay.visible .restart-btn {
+  cursor: pointer !important;
 }
 
 .score-card {
@@ -335,6 +448,15 @@ canvas {
   color: #ffffff;
   margin-bottom: 0.6rem;
   text-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.score-rings-detail {
+  font-family: 'Montserrat', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #ffaa00;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.4rem;
 }
 
 .score-distance {
@@ -375,6 +497,65 @@ canvas {
 .restart-btn:active {
   transform: translateY(4px);
   box-shadow: 0 2px 0 #b39b0d;
+}
+
+/* Audio Mute/Unmute Toggle Button */
+.audio-toggle-btn {
+  position: absolute;
+  top: 1.5rem;
+  left: 1.5rem;
+  z-index: 100;
+  width: 48px;
+  height: 48px;
+  background: rgba(9, 23, 36, 0.85);
+  border: 2px solid rgba(255, 222, 23, 0.7);
+  border-radius: 50%;
+  color: #ffde17;
+  font-size: 1.35rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  pointer-events: auto;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), background 0.2s ease, border-color 0.2s ease;
+  user-select: none;
+}
+
+.audio-toggle-btn:hover {
+  transform: scale(1.1);
+  background: rgba(15, 34, 53, 0.95);
+  border-color: #ffde17;
+  box-shadow: 0 6px 18px rgba(255, 222, 23, 0.35);
+}
+
+.audio-toggle-btn:active {
+  transform: scale(0.92);
+}
+
+.audio-toggle-btn #audio-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.audio-svg {
+  display: block;
+  stroke: #ffde17;
+  transition: stroke 0.2s ease, transform 0.2s ease;
+}
+
+.audio-toggle-btn.muted {
+  border-color: rgba(255, 95, 95, 0.75);
+}
+
+.audio-toggle-btn.muted .audio-svg {
+  stroke: #ff5f5f;
+}
+
+.audio-toggle-btn.muted:hover {
+  box-shadow: 0 6px 18px rgba(255, 95, 95, 0.35);
 }
 
 @keyframes pulse {

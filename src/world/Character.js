@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import charUrl from '../assets/models/skyDrop_char.glb?url'
+import parachuteUrl from '../assets/models/Parachute.glb?url'
 
 export default class Character {
   constructor(experience) {
@@ -17,14 +18,20 @@ export default class Character {
     // Physics & movement properties
     this.velocity = new THREE.Vector3(0, 0, 0)
     this.headingAngle = 0
-    this.pitchAngle = 0
+    this.pitchAngle = 0.08 // Slight natural forward dive
     this.rollAngle = 0
+    this.currentHorizontalSpeed = 38
+
+    // Parachute state & model
+    this.parachute = null
+    this.isParachuteOpen = false
+    this.parachuteDeployTimer = 0
 
     // Rapier physics handle
     this.physicsHandle = null
 
-    // Target landing ring center (LandingTarget at 0, 22.3, 0)
-    this.targetPos = new THREE.Vector3(0, 22.3, 0)
+    // Target landing ring center (LandingTarget at 0, 22.0, 0)
+    this.targetPos = new THREE.Vector3(0, 22.0, 0)
     this.scoreResult = null
 
     // Animations mixer
@@ -40,48 +47,143 @@ export default class Character {
       const gltf = await this.loader.loadGLTF(charUrl)
       this.model = gltf.scene
 
+      this.bones = {}
+      this.wingsuit = null
+
       this.model.traverse((child) => {
         if (child.isMesh) {
           const mats = Array.isArray(child.material) ? child.material : [child.material]
           mats.forEach((mat) => {
             if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace
+            mat.depthWrite = true
             mat.needsUpdate = true
           })
         }
+        if (child.name === 'SKY_Character_Wingsuit') {
+          this.wingsuit = child
+        }
+        if (child.isBone) {
+          this.bones[child.name] = child
+        }
       })
 
-      // Character placement:
-      // Standing solidly on the runway tarmac directly in front of the aircraft
+      // Character placement on runway tarmac
       this.group.position.set(426.0, 11.35, 558.5)
-
-      // Facing forward toward the camera:
       this.group.rotation.y = 0
 
-      this.model.scale.setScalar(1.15) // Clean hero character scale
+      this.model.scale.setScalar(1.15)
       this.group.add(this.model)
 
       // Animation Mixer
       if (gltf.animations && gltf.animations.length > 0) {
         this.mixer = new THREE.AnimationMixer(this.model)
         gltf.animations.forEach((clip) => {
-          this.animations[clip.name] = this.mixer.clipAction(clip)
+          const action = this.mixer.clipAction(clip)
+          action.setLoop(THREE.LoopRepeat)
+          this.animations[clip.name] = action
         })
+      }
+
+      // Load Parachute model
+      try {
+        const paraGltf = await this.loader.loadGLTF(parachuteUrl)
+        this.parachute = paraGltf.scene
+        this.parachute.traverse((child) => {
+          if (child.isMesh) {
+            const mats = Array.isArray(child.material) ? child.material : [child.material]
+            mats.forEach((mat) => {
+              if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace
+              mat.side = THREE.DoubleSide
+              mat.depthWrite = true
+              mat.needsUpdate = true
+            })
+          }
+        })
+        this.parachute.position.set(0, 2.12, 0.07)
+        this.parachute.scale.setScalar(0.95)
+        this.parachute.visible = false
+        this.group.add(this.parachute)
+        console.log('✅ Parachute model loaded and ready')
+      } catch (paraErr) {
+        console.warn('⚠️ Parachute failed to load:', paraErr)
       }
     } catch (err) {
       console.warn('⚠️ Character failed to load:', err)
     }
   }
 
-  playAnimation(name, transitionDuration = 0.3) {
+  playAnimation(name, transitionDuration = 0.25) {
     const action = this.animations[name]
     if (!action) return
     if (this.currentAction === action) return
 
-    action.reset().fadeIn(transitionDuration).play()
-    if (this.currentAction) {
+    if (!action.isRunning()) {
+      action.reset().fadeIn(transitionDuration).play()
+    } else {
+      action.enabled = true
+      action.setEffectiveTimeScale(1)
+      action.setEffectiveWeight(1)
+      action.fadeIn(transitionDuration)
+    }
+
+    if (this.currentAction && this.currentAction !== action) {
       this.currentAction.fadeOut(transitionDuration)
     }
     this.currentAction = action
+  }
+
+  _updateParachutePose(delta, keys) {
+    if (!this.bones) return
+
+    if (this.isParachuteOpen) {
+      // Hide wingsuit webbing mesh under parachute so skydiver holds risers cleanly
+      if (this.wingsuit && this.wingsuit.visible) {
+        this.wingsuit.visible = false
+      }
+
+      const grabProg = Math.min(1.0, this.parachuteDeployTimer / 0.45)
+      const smoothProg = grabProg * grabProg * (3 - 2 * grabProg)
+
+      const uArmL = this.bones['UpperArm_L']
+      const fArmL = this.bones['Forearm_L']
+      const uArmR = this.bones['UpperArm_R']
+      const fArmR = this.bones['Forearm_R']
+
+      if (uArmL && fArmL && uArmR && fArmR) {
+        // Toggle steering: pull left or right toggle downward
+        let leftPull = 0
+        let rightPull = 0
+        if (keys && keys.left && !keys.right) leftPull = 0.35
+        if (keys && keys.right && !keys.left) rightPull = 0.35
+        if (keys && (keys.backward || keys.shift)) {
+          leftPull = 0.45
+          rightPull = 0.45
+        }
+
+        // Left arm overhead grab Euler target (hands grip overhead parachute bar at x=±0.48, y=2.22, z=0.07)
+        const targetEulerUAL = new THREE.Euler(-2.39 + leftPull * 0.45, -0.59, -2.39 + leftPull * 0.25)
+        const targetEulerFAL = new THREE.Euler(0.40 + leftPull * 0.30, 0.10, 0.0)
+
+        // Right arm overhead grab Euler target
+        const targetEulerUAR = new THREE.Euler(-2.39 + rightPull * 0.45, 0.59, 2.39 - rightPull * 0.25)
+        const targetEulerFAR = new THREE.Euler(0.40 + rightPull * 0.30, -0.10, 0.0)
+
+        const targetQuatUAL = new THREE.Quaternion().setFromEuler(targetEulerUAL)
+        const targetQuatFAL = new THREE.Quaternion().setFromEuler(targetEulerFAL)
+        const targetQuatUAR = new THREE.Quaternion().setFromEuler(targetEulerUAR)
+        const targetQuatFAR = new THREE.Quaternion().setFromEuler(targetEulerFAR)
+
+        uArmL.quaternion.slerp(targetQuatUAL, smoothProg)
+        fArmL.quaternion.slerp(targetQuatFAL, smoothProg)
+        uArmR.quaternion.slerp(targetQuatUAR, smoothProg)
+        fArmR.quaternion.slerp(targetQuatFAR, smoothProg)
+      }
+    } else {
+      // Restore wingsuit during freefall
+      if (this.wingsuit && !this.wingsuit.visible) {
+        this.wingsuit.visible = true
+      }
+    }
   }
 
   enterPlane() {
@@ -93,16 +195,31 @@ export default class Character {
     this.state = 'playable'
     this.group.visible = true
 
+    // Activate mouse flight steering
+    if (this.experience.controls) {
+      this.experience.controls.setFlightActive(true)
+    }
+
+    // Parachute initially packed
+    this.isParachuteOpen = false
+    this.parachuteDeployTimer = 0
+    if (this.parachute) this.parachute.visible = false
+
     // Eject over island territory
     this.group.position.copy(planePosition)
     this.group.position.y -= 4.0
 
-    // Heading points directly towards the archery bullseye target (0, 0)
+    // Initial heading points directly towards the archery target (0, 0)
     const toTarget = new THREE.Vector2(this.targetPos.x - this.group.position.x, this.targetPos.z - this.group.position.z).normalize()
     this.headingAngle = Math.atan2(toTarget.x, toTarget.y)
+    this.pitchAngle = 0.08
+    this.aimPitch = 0.08
+    this.rollAngle = 0
 
-    // Initial forward glide velocity toward target
-    this.velocity.set(toTarget.x * 35, -24, toTarget.y * 35)
+    // Initial forward glide velocity toward target (calibrated to reach landing target directly)
+    this.velocity.set(toTarget.x * 12.0, -12.5, toTarget.y * 12.0)
+    this.forwardSpeed = 12.0
+    this.strafeSpeed = 0
 
     // Horizontal belly skydiving pose
     this.model.rotation.x = Math.PI / 2
@@ -128,42 +245,58 @@ export default class Character {
       this.group.position.z - this.targetPos.z
     )
 
-    let points = 0
+    let landingPoints = 0
     let rating = 'MISS'
     let ringName = 'Outside Target'
 
+    // Scoring based on archery target color rings: 50 (Yellow), 40 (Red), 30 (White), 20 (Blue), 10 (White Edge)
     if (distToCenter <= 5.0) {
-      points = 1000
+      landingPoints = 50
       rating = 'PERFECT BULLSEYE!'
       ringName = 'Yellow Bullseye'
     } else if (distToCenter <= 14.0) {
-      points = 750
-      rating = 'GREAT LANDING!'
+      landingPoints = 40
+      rating = 'EXCELLENT LANDING!'
       ringName = 'Red Inner Ring'
     } else if (distToCenter <= 24.0) {
-      points = 500
-      rating = 'GOOD SHOT!'
+      landingPoints = 30
+      rating = 'GREAT SHOT!'
       ringName = 'White Middle Ring'
     } else if (distToCenter <= 35.0) {
-      points = 300
-      rating = 'NICE GLIDE'
+      landingPoints = 20
+      rating = 'GOOD TOUCHDOWN'
       ringName = 'Blue Outer Ring'
-    } else if (distToCenter <= 46.0) {
-      points = 150
-      rating = 'BORDER HIT'
-      ringName = 'White Outer Ring'
     } else if (distToCenter <= 54.0) {
-      points = 50
-      rating = 'TOUCHDOWN'
-      ringName = 'Landing Pad Edge'
+      landingPoints = 10
+      rating = 'PAD EDGE'
+      ringName = 'White Outer Ring'
     } else {
-      points = 0
+      landingPoints = 0
       rating = 'MISSED TARGET'
       ringName = 'Island Ground'
     }
 
+    // Rings collection points (+10 PTS per ring)
+    const rings = this.experience.world.rings
+    const ringPoints = rings ? rings.getRingPoints() : 0
+    const ringsCollected = rings ? rings.collectedCount : 0
+    const totalRings = rings ? rings.totalRings : 3
+
+    const totalScore = landingPoints + ringPoints
+
+    if (ringsCollected === totalRings && landingPoints === 50) {
+      rating = 'LEGENDARY 80 PTS MASTER!'
+    } else if (landingPoints === 50) {
+      rating = 'PERFECT BULLSEYE!'
+    } else if (ringsCollected >= 2) {
+      rating = 'ACROBATIC ACE!'
+    }
+
     this.scoreResult = {
-      points,
+      totalScore,
+      landingPoints,
+      ringPoints,
+      ringsCollected,
       rating,
       ringName,
       distance: distToCenter.toFixed(1)
@@ -172,12 +305,18 @@ export default class Character {
     const scoreOverlay = document.getElementById('score-overlay')
     const scorePointsEl = document.getElementById('score-points')
     const scoreRatingEl = document.getElementById('score-rating')
+    const scoreRingsDetailEl = document.getElementById('score-rings-detail')
     const scoreDistEl = document.getElementById('score-distance')
 
     if (scoreOverlay) {
-      if (scorePointsEl) scorePointsEl.innerText = `${points} PTS`
+      if (scorePointsEl) scorePointsEl.innerText = `${totalScore} PTS`
       if (scoreRatingEl) scoreRatingEl.innerText = rating
-      if (scoreDistEl) scoreDistEl.innerText = `${distToCenter.toFixed(1)}m from center (${ringName})`
+      if (scoreRingsDetailEl) {
+        scoreRingsDetailEl.innerText = `Rings Collected: ${ringsCollected} / ${totalRings} (+${ringPoints} PTS)`
+      }
+      if (scoreDistEl) {
+        scoreDistEl.innerText = `Landing: ${distToCenter.toFixed(1)}m from center (${ringName}) (+${landingPoints} PTS)`
+      }
       scoreOverlay.classList.add('visible')
     }
 
@@ -193,100 +332,299 @@ export default class Character {
     if (this.state === 'runway' || this.state === 'in_plane' || this.state === 'landed') return
 
     const controls = this.experience.controls
+    const keys = controls ? controls.keys : {}
 
-    if (this.state === 'diving_auto') {
-      this.velocity.y -= 14 * delta
-      this.group.position.addScaledVector(this.velocity, delta)
-      this.group.rotation.set(0.2, this.headingAngle, 0, 'YXZ')
-
-      if (this.physicsHandle && this.physicsHandle.rigidBody) {
-        this.physicsHandle.rigidBody.setTranslation(
-          { x: this.group.position.x, y: this.group.position.y, z: this.group.position.z },
-          true
-        )
-      }
-      return
-    }
+    // Procedural Parachute Steering & Gripping Posture (overrides fly animation on arms)
+    this._updateParachutePose(delta, keys)
 
     if (this.state === 'playable') {
-      const keys = controls.keys
+      const mouseDelta = controls.getMouseDelta()
 
-      let targetFallSpeed = -24
-      let horizontalSpeed = 42
+      // ── Flight Steering & Orientation Controls ─────────────────────────────
+      if (!keys.freeLook) {
+        // Horizontal yaw steering (Mouse X)
+        if (Math.abs(mouseDelta.x) > 0.05) {
+          const mouseSens = 0.0010
+          this.headingAngle -= mouseDelta.x * mouseSens
+        }
 
-      if (keys.space) {
-        targetFallSpeed = -58
-        horizontalSpeed = 62
+        // Expanded vertical pitch limits for effortless ring targeting (Mouse Y)
+        if (Math.abs(mouseDelta.y) > 0.05) {
+          const pitchSens = 0.0016
+          const minPitch = this.isParachuteOpen ? -0.22 : -0.48 // Up to ~27.5° flare / climb
+          const maxPitch = this.isParachuteOpen ? 0.30 : 0.65   // Up to ~37.2° steep dive
+
+          if (this.aimPitch === undefined) this.aimPitch = this.pitchAngle || 0.08
+          this.aimPitch = THREE.MathUtils.clamp(
+            this.aimPitch + mouseDelta.y * pitchSens,
+            minPitch,
+            maxPitch
+          )
+        }
       }
 
-      if (keys.shift) {
-        targetFallSpeed = -13
-        horizontalSpeed = 26
-      }
-
-      this.velocity.y = THREE.MathUtils.lerp(this.velocity.y, targetFallSpeed, delta * 4.0)
-
-      const turnRate = 1.9
+      // Keyboard A / D steering trims & turning
+      const keyTurnRate = 2.8 // Responsive, agile turn rate
+      let keyTurnInput = 0
       if (keys.left) {
-        this.headingAngle += turnRate * delta
-        this.rollAngle = THREE.MathUtils.lerp(this.rollAngle, 0.45, delta * 6)
-        this.playAnimation('SKY_Bank_Left', 0.2)
-      } else if (keys.right) {
-        this.headingAngle -= turnRate * delta
-        this.rollAngle = THREE.MathUtils.lerp(this.rollAngle, -0.45, delta * 6)
-        this.playAnimation('SKY_Bank_Right', 0.2)
-      } else {
-        this.rollAngle = THREE.MathUtils.lerp(this.rollAngle, 0, delta * 5)
-        this.playAnimation('SKY_Fly_Idle', 0.2)
+        this.headingAngle += keyTurnRate * delta
+        keyTurnInput += 1
+      }
+      if (keys.right) {
+        this.headingAngle -= keyTurnRate * delta
+        keyTurnInput -= 1
       }
 
-      if (keys.forward) {
-        this.pitchAngle = THREE.MathUtils.lerp(this.pitchAngle, 0.4, delta * 5)
-        horizontalSpeed *= 1.35
-      } else if (keys.backward) {
-        this.pitchAngle = THREE.MathUtils.lerp(this.pitchAngle, -0.3, delta * 5)
-        horizontalSpeed *= 0.7
+      // ── Aerodynamic Banking Roll & Animations ──────────────────────────────
+      let targetRoll = 0
+      if (!this.isParachuteOpen) {
+        const mouseTurnInput = keys.freeLook ? 0 : (-mouseDelta.x * 0.02)
+        const combinedTurn = THREE.MathUtils.clamp(keyTurnInput * 0.6 + mouseTurnInput, -1.0, 1.0)
+        targetRoll = combinedTurn * 0.34 // Maximum bank angle ~20°
       } else {
-        this.pitchAngle = THREE.MathUtils.lerp(this.pitchAngle, 0, delta * 4)
+        // User request: when parachute is open, do not rotate character on Z axis
+        targetRoll = 0
       }
 
+      this.rollAngle = this.isParachuteOpen ? 0 : THREE.MathUtils.damp(this.rollAngle, targetRoll, 7.0, delta)
+
+      // Animation selection matching banking roll (only during freefall)
+      if (!this.isParachuteOpen) {
+        if (this.rollAngle > 0.10) {
+          this.playAnimation('SKY_Bank_Left', 0.2)
+        } else if (this.rollAngle < -0.10) {
+          this.playAnimation('SKY_Bank_Right', 0.2)
+        } else {
+          this.playAnimation('SKY_Fly_Idle', 0.25)
+        }
+      }
+
+      // ── W (Forward) / S (Backward) Direct Motion & Pitch Controls ──────────
+      if (this.aimPitch === undefined) this.aimPitch = 0.08
+
+      // Key commands dynamically guide pitch posture
+      if (keys.forward && !keys.backward) {
+        // W: Active forward dive posture
+        const diveTarget = this.isParachuteOpen ? 0.04 : 0.48
+        this.aimPitch = THREE.MathUtils.damp(this.aimPitch, diveTarget, 6.0, delta)
+      } else if (keys.backward && !keys.forward) {
+        // S: Active pull-up flare posture (leaning back while backing up)
+        const flareTarget = this.isParachuteOpen ? -0.06 : -0.34
+        this.aimPitch = THREE.MathUtils.damp(this.aimPitch, flareTarget, 6.0, delta)
+      } else if (keys.space) {
+        const spaceTarget = this.isParachuteOpen ? 0.05 : 0.58
+        this.aimPitch = THREE.MathUtils.damp(this.aimPitch, spaceTarget, 6.0, delta)
+      } else if (keys.shift) {
+        const shiftTarget = this.isParachuteOpen ? -0.06 : -0.36
+        this.aimPitch = THREE.MathUtils.damp(this.aimPitch, shiftTarget, 6.0, delta)
+      } else if (!keys.freeLook && Math.abs(mouseDelta.y) <= 0.05) {
+        // Gentle aerodynamic leveling only when completely hands-off
+        const neutralPitch = this.isParachuteOpen ? 0.0 : 0.08
+        this.aimPitch = THREE.MathUtils.damp(this.aimPitch, neutralPitch, 2.5, delta)
+      }
+
+      // Smooth pitch damping towards aimPitch
+      this.pitchAngle = THREE.MathUtils.damp(this.pitchAngle, this.aimPitch, 6.5, delta)
+
+      // ── High Authority Movement Values: Forward (W), Backward (S), Strafe (A/D) ──
+      // Neutral cruising speeds
+      let targetForwardSpeed = this.isParachuteOpen ? 4.5 : 12.0
+      let targetStrafeSpeed = 0
+      let targetFallSpeed = -12.5
+
+      if (this.isParachuteOpen) {
+        this.parachuteDeployTimer += delta
+        const openProg = Math.min(1.0, this.parachuteDeployTimer / 0.6)
+
+        // Smooth canopy opening pop
+        const currentScale = THREE.MathUtils.lerp(0.1, 0.95, openProg)
+        if (this.parachute) {
+          this.parachute.scale.set(currentScale, currentScale, currentScale)
+          this.parachute.rotation.z = 0 // Strictly zero Z-axis roll under parachute
+        }
+
+        // Smoothly rotate character from belly-fall to upright standing stance
+        this.model.rotation.x = THREE.MathUtils.lerp(Math.PI / 2, 0, openProg)
+        this.model.rotation.z = 0 // Strictly zero Z-axis roll
+
+        targetFallSpeed = -4.5
+
+        // Parachute forward / backward / strafe
+        if (keys.forward && !keys.backward) {
+          targetForwardSpeed = 14.0 // W: Move forward swiftly under parachute
+          targetFallSpeed = -5.8
+        } else if (keys.backward && !keys.forward) {
+          targetForwardSpeed = -4.5 // S: Back up / reverse under parachute
+          targetFallSpeed = -1.8
+        }
+
+        if (keys.left && !keys.right) {
+          targetStrafeSpeed = -7.0 // A: Strafe left
+        } else if (keys.right && !keys.left) {
+          targetStrafeSpeed = 7.0  // D: Strafe right
+        }
+
+        if (keys.shift) {
+          targetFallSpeed = -1.8 // Soft landing flare
+        }
+      } else {
+        // High-altitude Wingsuit Freefall:
+        if (keys.forward && !keys.backward) {
+          // W: Surge Forward with High Power (+26 m/s)!
+          targetForwardSpeed = 26.0
+          targetFallSpeed = -24.0
+        } else if (keys.backward && !keys.forward) {
+          // S: Move Backward in Reverse (-10 m/s) with high float (-6.5 m/s)!
+          targetForwardSpeed = -10.0
+          targetFallSpeed = -6.5 // Feather float: lots of time to align and collect rings!
+        } else if (keys.space) {
+          targetForwardSpeed = 28.0
+          targetFallSpeed = -28.0
+        } else if (keys.shift) {
+          targetForwardSpeed = 6.0
+          targetFallSpeed = -6.0
+        } else {
+          // Modulate cruising fall speed with mouse aim pitch
+          const diveFactor = THREE.MathUtils.clamp((this.pitchAngle + 0.32) / 0.90, 0.0, 1.0)
+          targetFallSpeed = THREE.MathUtils.lerp(-7.0, -24.0, diveFactor)
+        }
+
+        // A / D: Direct Lateral Strafe Movement
+        if (keys.left && !keys.right) {
+          targetStrafeSpeed = -14.0 // A: Direct glide left
+        } else if (keys.right && !keys.left) {
+          targetStrafeSpeed = 14.0  // D: Direct glide right
+        }
+      }
+
+      // Responsive, snappy speed damping (rate 7.0 for instant agile feedback)
+      const moveLerpRate = 7.0
+      this.forwardSpeed = THREE.MathUtils.damp(this.forwardSpeed || targetForwardSpeed, targetForwardSpeed, moveLerpRate, delta)
+      this.strafeSpeed = THREE.MathUtils.damp(this.strafeSpeed || 0, targetStrafeSpeed, moveLerpRate, delta)
+      this.velocity.y = THREE.MathUtils.damp(this.velocity.y, targetFallSpeed, this.isParachuteOpen ? 5.0 : 6.0, delta)
+
+      // Forward vector and perpendicular right strafe vector along heading
       const fX = Math.sin(this.headingAngle)
       const fZ = Math.cos(this.headingAngle)
+      const rX = Math.cos(this.headingAngle)
+      const rZ = -Math.sin(this.headingAngle)
 
-      this.velocity.x = fX * horizontalSpeed
-      this.velocity.z = fZ * horizontalSpeed
+      // Combined 6-DOF horizontal velocity (Forward/Backward + Left/Right Strafe)
+      this.velocity.x = fX * this.forwardSpeed + rX * this.strafeSpeed
+      this.velocity.z = fZ * this.forwardSpeed + rZ * this.strafeSpeed
 
+      // Move character smoothly by velocity (rock-solid, zero-jitter)
+      this.group.position.x += this.velocity.x * delta
+      this.group.position.y += this.velocity.y * delta
+      this.group.position.z += this.velocity.z * delta
+
+      // Synchronize Rapier cylinder rigid body
       if (this.physicsHandle && this.physicsHandle.rigidBody) {
         const body = this.physicsHandle.rigidBody
+        body.setTranslation({ x: this.group.position.x, y: this.group.position.y, z: this.group.position.z }, true)
         body.setLinvel({ x: this.velocity.x, y: this.velocity.y, z: this.velocity.z }, true)
-        const pos = body.translation()
-        this.group.position.set(pos.x, pos.y, pos.z)
-      } else {
-        this.group.position.addScaledVector(this.velocity, delta)
       }
 
+      // Character orientation: pitch, heading, roll
+      // When parachute is open, strictly zero Z-axis roll (no rotation on Z axis)
+      const currentRoll = this.isParachuteOpen ? 0 : this.rollAngle
+      this.group.rotation.set(this.pitchAngle, this.headingAngle, currentRoll, 'YXZ')
+
+      // ── Dynamic Web Audio Diving Wind Update ──────────────────────────────
+      if (this.experience.audio) {
+        const fallSpeed = Math.abs(this.velocity.y)
+        const horizSpeed = Math.hypot(this.velocity.x, this.velocity.z)
+        this.experience.audio.updateDivingWind(fallSpeed, horizSpeed, this.isParachuteOpen)
+      }
+
+      // ── Altitude & Landing Target Check ────────────────────────────────────
       const distToTarget = Math.hypot(
         this.group.position.x - this.targetPos.x,
         this.group.position.z - this.targetPos.z
       )
-      const alt = Math.max(0, this.group.position.y - 22.0)
+
+      let groundY = 22.0
+      if (distToTarget <= 5.0) {
+        groundY = 22.8
+      } else if (distToTarget <= 50.0) {
+        groundY = 22.7
+      } else if (distToTarget <= 54.0) {
+        groundY = 22.3
+      }
+
+      const currentAlt = Math.max(0, this.group.position.y - groundY)
       const altEl = document.getElementById('hud-alt')
       const distEl = document.getElementById('hud-target-dist')
-      if (altEl) altEl.innerText = `${Math.round(alt)} m`
-      if (distEl) distEl.innerText = `${Math.round(distToTarget)} m`
 
-      if (this.group.position.y <= 22.3) {
-        this.group.position.y = 22.3
+      // Automatic parachute deployment at altitude <= 150m
+      if (currentAlt <= 150.0 && !this.isParachuteOpen) {
+        this.isParachuteOpen = true
+        this.parachuteDeployTimer = 0
+        if (this.parachute) {
+          this.parachute.visible = true
+          this.parachute.scale.set(0.1, 0.1, 0.1)
+        }
+        // Audio: Play realistic canopy snap, inflation thump, and switch to gentle breeze
+        if (this.experience.audio) {
+          this.experience.audio.playParachuteDeploy()
+        }
+      }
+
+      // Ground touchdown check
+      const isTouchdown = this.group.position.y <= (groundY + 0.15) || currentAlt <= 0.15
+
+      if (isTouchdown) {
+        this.group.position.y = groundY // Flush on target surface - zero gap!
         this.state = 'landed'
         this.velocity.set(0, 0, 0)
+
+        // Audio: Stop diving wind and play ground touchdown impact & victory fanfare
+        if (this.experience.audio) {
+          this.experience.audio.stopDivingWind(0.25)
+          const isBullseye = (distToTarget <= 5.0)
+          this.experience.audio.playTouchdown(isBullseye)
+        }
+
+        if (this.experience.controls) {
+          this.experience.controls.setFlightActive(false)
+          this.experience.controls.exitPointerLock()
+        }
+        if (document.exitPointerLock) {
+          try {
+            document.exitPointerLock()
+          } catch (e) {}
+        }
+
         if (this.physicsHandle && this.physicsHandle.rigidBody) {
+          this.physicsHandle.rigidBody.setTranslation(
+            { x: this.group.position.x, y: groundY, z: this.group.position.z },
+            true
+          )
           this.physicsHandle.rigidBody.setLinvel({ x: 0, y: 0, z: 0 }, true)
         }
+
+        // Parachute disappears immediately on landing
+        if (this.parachute) {
+          this.parachute.visible = false
+        }
+
+        // Stand upright cleanly
+        this.model.rotation.x = 0
+        this.pitchAngle = 0
+        this.rollAngle = 0
+        this.group.rotation.set(0, this.headingAngle, 0)
+
+        // Show 0 m
+        if (altEl) altEl.innerText = '0 m'
+        if (distEl) distEl.innerText = `${Math.round(distToTarget)} m`
+
+        // Display score modal popup
         this.calculateLandingScore()
         return
       }
 
-      this.group.rotation.set(this.pitchAngle, this.headingAngle, this.rollAngle, 'YXZ')
+      if (altEl) altEl.innerText = `${Math.round(currentAlt)} m`
+      if (distEl) distEl.innerText = `${Math.round(distToTarget)} m`
     }
   }
 }
