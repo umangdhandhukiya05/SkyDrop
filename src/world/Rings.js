@@ -20,7 +20,38 @@ export default class Rings {
 
     this._audioCtx = null
 
+    // Diver's hands-off glide (m/s) — rings are laid along this slope
+    this.glideForward = 12.0
+    this.glideFall = 14.6
+
+    this.glowGroup = new THREE.Group()
+    this.glowGroup.name = 'Diving_Ring_Glows'
+    this.scene.add(this.glowGroup)
+    this.glowMaterial = this._createGlowMaterial()
+
     this._load()
+  }
+
+  _createGlowMaterial() {
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 128
+    const ctx = canvas.getContext('2d')
+    const g = ctx.createRadialGradient(64, 64, 0, 64, 64, 64)
+    g.addColorStop(0, 'rgba(255, 230, 140, 1)')
+    g.addColorStop(0.25, 'rgba(255, 170, 0, 0.75)')
+    g.addColorStop(1, 'rgba(255, 120, 0, 0)')
+    ctx.fillStyle = g
+    ctx.fillRect(0, 0, 128, 128)
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.colorSpace = THREE.SRGBColorSpace
+    return new THREE.SpriteMaterial({
+      map: texture,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+      sizeAttenuation: false,
+      fog: false
+    })
   }
 
   async _load() {
@@ -59,79 +90,63 @@ export default class Rings {
     }
   }
 
-  _generateRingDefinitions() {
-    // Procedural ring placement: randomly spawn 3 or 4 rings along flight corridor
+  _generateRingDefinitions(dropPos) {
+    // Rings sit on the line a hands-off diver naturally glides along from the jump point,
+    // so holding course (with small corrections) threads every ring
     const count = Math.random() < 0.5 ? 3 : 4
     this.totalRings = count
     this.ringDefinitions = []
 
-    // Actual drop position from plane at 10s takeoff: (532, 960, 137)
-    const jumpPos = new THREE.Vector3(532, 960, 137)
-    const targetPos = new THREE.Vector3(0, 22.8, 0)
+    const jumpPos = dropPos ? dropPos.clone() : new THREE.Vector3(660, 956, 0)
+    const target = new THREE.Vector3(0, jumpPos.y, 0)
+    const dir = new THREE.Vector3().subVectors(target, jumpPos).setY(0).normalize()
+    const side = new THREE.Vector3(-dir.z, 0, dir.x)
 
-    if (count === 3) {
-      // 3 Rings evenly spaced along freefall glide path (730m, 520m, 320m)
-      const configs = [
-        { progress: 0.24, baseAlt: 730, jitterY: 20, jitterXZ: 20 },
-        { progress: 0.52, baseAlt: 520, jitterY: 20, jitterXZ: 22 },
-        { progress: 0.78, baseAlt: 320, jitterY: 20, jitterXZ: 20 }
-      ]
-      configs.forEach((cfg, idx) => {
-        const posX = THREE.MathUtils.lerp(jumpPos.x, targetPos.x, cfg.progress) + (Math.random() - 0.5) * cfg.jitterXZ
-        const posY = cfg.baseAlt + (Math.random() - 0.5) * cfg.jitterY
-        const posZ = THREE.MathUtils.lerp(jumpPos.z, targetPos.z, cfg.progress) + (Math.random() - 0.5) * cfg.jitterXZ
-        this.ringDefinitions.push({
-          id: idx + 1,
-          pos: new THREE.Vector3(Math.round(posX), Math.round(posY), Math.round(posZ)),
-          scale: 7.0
-        })
-      })
-    } else {
-      // 4 Rings distributed along freefall descent (780m, 615m, 440m, 280m)
-      const configs = [
-        { progress: 0.18, baseAlt: 780, jitterY: 18, jitterXZ: 18 },
-        { progress: 0.40, baseAlt: 615, jitterY: 18, jitterXZ: 20 },
-        { progress: 0.63, baseAlt: 440, jitterY: 18, jitterXZ: 20 },
-        { progress: 0.84, baseAlt: 280, jitterY: 18, jitterXZ: 18 }
-      ]
-      configs.forEach((cfg, idx) => {
-        const posX = THREE.MathUtils.lerp(jumpPos.x, targetPos.x, cfg.progress) + (Math.random() - 0.5) * cfg.jitterXZ
-        const posY = cfg.baseAlt + (Math.random() - 0.5) * cfg.jitterY
-        const posZ = THREE.MathUtils.lerp(jumpPos.z, targetPos.z, cfg.progress) + (Math.random() - 0.5) * cfg.jitterXZ
-        this.ringDefinitions.push({
-          id: idx + 1,
-          pos: new THREE.Vector3(Math.round(posX), Math.round(posY), Math.round(posZ)),
-          scale: 7.0
-        })
-      })
-    }
+    // Neutral freefall: ~12 m/s forward, ~14.6 m/s down (see Character playable update)
+    const forwardPerMetreDrop = this.glideForward / this.glideFall
+
+    // Altitudes spread from shortly after exit down to just above chute height
+    const altitudes = count === 3 ? [800, 600, 400] : [820, 660, 500, 340]
+
+    altitudes.forEach((alt, idx) => {
+      const drop = jumpPos.y - alt
+      const along = drop * forwardPerMetreDrop
+      // Gentle alternating side offset keeps it interesting but always within an easy correction
+      const lateral = idx === 0 ? 0 : (idx % 2 === 0 ? 1 : -1) * 7
+      const pos = new THREE.Vector3()
+        .copy(jumpPos)
+        .addScaledVector(dir, along)
+        .addScaledVector(side, lateral)
+      pos.y = alt
+      this.ringDefinitions.push({ id: idx + 1, pos, dir: dir.clone(), scale: 8.0 })
+    })
   }
 
-  _spawnRings() {
+  _spawnRings(dropPos) {
+    if (dropPos) this.dropPos = dropPos.clone()
     if (!this.ringTemplate) return
 
     // Clear old rings if re-spawning
     while (this.group.children.length > 0) {
       this.group.remove(this.group.children[0])
     }
+    while (this.glowGroup.children.length > 0) {
+      this.glowGroup.remove(this.glowGroup.children[0])
+    }
     this.rings = []
     this.collectedCount = 0
     this.prevCharPos = null
 
-    this._generateRingDefinitions()
-
-    const targetPos = new THREE.Vector3(0, 22.8, 0)
+    this._generateRingDefinitions(this.dropPos)
 
     this.ringDefinitions.forEach((def, index) => {
       const ringRoot = this.ringTemplate.clone(true)
       ringRoot.position.copy(def.pos)
       ringRoot.scale.setScalar(def.scale)
 
-      // Aim ring square towards incoming flyer from jump point
-      const dirToTarget = new THREE.Vector3().subVectors(targetPos, def.pos).normalize()
-      const lookPos = new THREE.Vector3().addVectors(def.pos, dirToTarget)
-      ringRoot.lookAt(lookPos)
-      ringRoot.rotateX(-0.15)
+      // Hole (local Z) faces straight down the glide path so the diver flies cleanly through
+      const glideVel = new THREE.Vector3().copy(def.dir).multiplyScalar(this.glideForward).setY(-this.glideFall)
+      ringRoot.lookAt(new THREE.Vector3().addVectors(def.pos, glideVel))
 
       // Guarantee 100% solid opacity across all child meshes
       ringRoot.traverse((child) => {
@@ -152,12 +167,19 @@ export default class Rings {
 
       this.group.add(ringRoot)
 
+      // Constant-screen-size glow so rings are easy to spot from far away
+      const glow = new THREE.Sprite(this.glowMaterial)
+      glow.position.copy(def.pos)
+      glow.scale.setScalar(0.09)
+      this.glowGroup.add(glow)
+
       this.rings.push({
         id: def.id,
         root: ringRoot,
         light: beaconLight,
+        glow,
         center: def.pos.clone(),
-        radius: 16.0, // Large generous collection radius (diameter 32m)
+        radius: 18.0, // Generous collection radius (ring hole is 16 m)
         collected: false,
         missed: false,
         pulseTime: index * 0.8,
@@ -180,7 +202,7 @@ export default class Rings {
         const horizDist = Math.hypot(charPos.x - ring.center.x, charPos.z - ring.center.z)
         const vertDist = Math.abs(charPos.y - ring.center.y)
 
-        let isHit = (dist <= ring.radius) || (horizDist <= 16.0 && vertDist <= 16.0)
+        let isHit = (dist <= ring.radius) || (horizDist <= ring.radius && vertDist <= ring.radius)
 
         // Swept segment check between previous frame and current frame (catches high-speed dives)
         if (!isHit && this.prevCharPos) {
@@ -205,6 +227,7 @@ export default class Rings {
         if (!ring.missed && charPos.y < (ring.center.y - 25.0)) {
           ring.missed = true
           if (ring.light) ring.light.intensity = 0.2
+          if (ring.glow) ring.glow.visible = false
         }
 
         if (!ring.missed) {
@@ -218,6 +241,14 @@ export default class Rings {
       }
     }
 
+    // The next ring to fly through pulses bigger so the route reads at a glance
+    const next = this.getNextRing()
+    for (const ring of this.rings) {
+      if (!ring.glow || !ring.glow.visible) continue
+      const pulse = ring === next ? 0.12 + Math.sin(ring.pulseTime * 4.0) * 0.025 : 0.07
+      ring.glow.scale.setScalar(pulse)
+    }
+
     // Save previous character position for swept collision detection on next tick
     if (!this.prevCharPos) this.prevCharPos = new THREE.Vector3()
     this.prevCharPos.copy(charPos)
@@ -228,6 +259,7 @@ export default class Rings {
     ring.collected = true
     this.collectedCount++
     ring.root.visible = false
+    if (ring.glow) ring.glow.visible = false
 
     // Play arcade chime
     this._playChime()
@@ -237,6 +269,10 @@ export default class Rings {
 
     // Update HUD telemetry immediately
     this.updateHUD()
+
+    // Screen flash + camera punch for tactile feedback
+    if (this.experience.hud) this.experience.hud.flash()
+    if (this.experience.camera) this.experience.camera.kick(0.6)
 
     console.log(`🎯 RING ${ring.id} COLLECTED! (${this.collectedCount} / ${this.totalRings}) -> +${this.getRingPoints()} PTS`)
   }
@@ -296,12 +332,37 @@ export default class Rings {
     }
   }
 
+  getNextRing() {
+    return this.rings.find((ring) => !ring.collected && !ring.missed) || null
+  }
+
   getRingPoints() {
     return this.collectedCount * this.pointsPerRing
   }
 
   reset() {
     this._spawnRings()
+  }
+
+  clear() {
+    this.dropPos = null
+    this.group.clear()
+    this.glowGroup.clear()
+    this.rings = []
+    this.collectedCount = 0
+    this.updateHUD()
+  }
+
+  shiftBy(offset) {
+    for (const ring of this.rings) {
+      ring.root.position.add(offset)
+      ring.center.add(offset)
+      if (ring.glow) ring.glow.position.add(offset)
+    }
+  }
+
+  spawnAlong(dropPos) {
+    this._spawnRings(dropPos)
   }
 }
 

@@ -27,6 +27,24 @@ export default class Character {
     this.isParachuteOpen = false
     this.parachuteDeployTimer = 0
 
+    // Manual chute: prompt below chutePromptAlt, forced open at chuteAutoAlt.
+    // Pulling it yourself low (but before auto) earns a bonus.
+    this.chutePromptAlt = 400
+    this.chuteBonusAlt = 250
+    this.chuteAutoAlt = 90
+    this.chuteBonusPoints = 10
+    this.chuteBonus = 0
+
+    // Canopy flight (m/s): forward speed and sink rate for cruise, W push, S brake, SHIFT flare
+    this.chuteGlide = {
+      cruise: 9.0, cruiseFall: -5.0,
+      push: 15.0, pushFall: -7.5,
+      brake: 3.5, brakeFall: -3.0,
+      flareFall: -2.0
+    }
+    this.chuteTurnRate = 1.25 // rad/s with A / D
+    this.chuteBankMax = 0.3   // ~17° pendulum swing into turns
+
     // Rapier physics handle
     this.physicsHandle = null
 
@@ -203,6 +221,7 @@ export default class Character {
     // Parachute initially packed
     this.isParachuteOpen = false
     this.parachuteDeployTimer = 0
+    this.chuteBonus = 0
     if (this.parachute) this.parachute.visible = false
 
     // Eject over island territory
@@ -232,6 +251,21 @@ export default class Character {
         this.group.position.y,
         this.group.position.z
       )
+    }
+  }
+
+  _deployParachute() {
+    this.isParachuteOpen = true
+    this.parachuteDeployTimer = 0
+    if (this.parachute) {
+      this.parachute.visible = true
+      this.parachute.scale.set(0.1, 0.1, 0.1)
+    }
+    if (this.experience.hud) this.experience.hud.showChutePrompt(false)
+    if (this.experience.camera) this.experience.camera.kick(0.7)
+    // Audio: Play realistic canopy snap, inflation thump, and switch to gentle breeze
+    if (this.experience.audio) {
+      this.experience.audio.playParachuteDeploy()
     }
   }
 
@@ -282,10 +316,10 @@ export default class Character {
     const ringsCollected = rings ? rings.collectedCount : 0
     const totalRings = rings ? rings.totalRings : 3
 
-    const totalScore = landingPoints + ringPoints
+    const totalScore = landingPoints + ringPoints + this.chuteBonus
 
     if (ringsCollected === totalRings && landingPoints === 50) {
-      rating = 'LEGENDARY 80 PTS MASTER!'
+      rating = 'LEGENDARY MASTER!'
     } else if (landingPoints === 50) {
       rating = 'PERFECT BULLSEYE!'
     } else if (ringsCollected >= 2) {
@@ -312,7 +346,9 @@ export default class Character {
       if (scorePointsEl) scorePointsEl.innerText = `${totalScore} PTS`
       if (scoreRatingEl) scoreRatingEl.innerText = rating
       if (scoreRingsDetailEl) {
-        scoreRingsDetailEl.innerText = `Rings Collected: ${ringsCollected} / ${totalRings} (+${ringPoints} PTS)`
+        scoreRingsDetailEl.innerText =
+          `Rings Collected: ${ringsCollected} / ${totalRings} (+${ringPoints} PTS)` +
+          (this.chuteBonus ? `  ·  Low Pull Bonus (+${this.chuteBonus} PTS)` : '')
       }
       if (scoreDistEl) {
         scoreDistEl.innerText = `Landing: ${distToCenter.toFixed(1)}m from center (${ringName}) (+${landingPoints} PTS)`
@@ -344,13 +380,13 @@ export default class Character {
       if (!keys.freeLook) {
         // Horizontal yaw steering (Mouse X)
         if (Math.abs(mouseDelta.x) > 0.05) {
-          const mouseSens = 0.0010
+          const mouseSens = 0.0026
           this.headingAngle -= mouseDelta.x * mouseSens
         }
 
         // Expanded vertical pitch limits for effortless ring targeting (Mouse Y)
         if (Math.abs(mouseDelta.y) > 0.05) {
-          const pitchSens = 0.0016
+          const pitchSens = 0.0022
           const minPitch = this.isParachuteOpen ? -0.22 : -0.48 // Up to ~27.5° flare / climb
           const maxPitch = this.isParachuteOpen ? 0.30 : 0.65   // Up to ~37.2° steep dive
 
@@ -363,8 +399,8 @@ export default class Character {
         }
       }
 
-      // Keyboard A / D steering trims & turning
-      const keyTurnRate = 2.8 // Responsive, agile turn rate
+      // Keyboard A / D steering: agile in freefall; under canopy a steady toggle turn like PUBG / BGMI
+      const keyTurnRate = this.isParachuteOpen ? this.chuteTurnRate : 2.8
       let keyTurnInput = 0
       if (keys.left) {
         this.headingAngle += keyTurnRate * delta
@@ -376,17 +412,17 @@ export default class Character {
       }
 
       // ── Aerodynamic Banking Roll & Animations ──────────────────────────────
-      let targetRoll = 0
+      const mouseTurnInput = keys.freeLook ? 0 : (-mouseDelta.x * 0.035)
+      const combinedTurn = THREE.MathUtils.clamp(keyTurnInput * 0.6 + mouseTurnInput, -1.0, 1.0)
+      let targetRoll
       if (!this.isParachuteOpen) {
-        const mouseTurnInput = keys.freeLook ? 0 : (-mouseDelta.x * 0.02)
-        const combinedTurn = THREE.MathUtils.clamp(keyTurnInput * 0.6 + mouseTurnInput, -1.0, 1.0)
         targetRoll = combinedTurn * 0.34 // Maximum bank angle ~20°
+        this.rollAngle = THREE.MathUtils.damp(this.rollAngle, targetRoll, 7.0, delta)
       } else {
-        // User request: when parachute is open, do not rotate character on Z axis
-        targetRoll = 0
+        // Canopy and diver swing into the turn together as one pendulum (slower response)
+        targetRoll = combinedTurn * this.chuteBankMax
+        this.rollAngle = THREE.MathUtils.damp(this.rollAngle, targetRoll, 3.0, delta)
       }
-
-      this.rollAngle = this.isParachuteOpen ? 0 : THREE.MathUtils.damp(this.rollAngle, targetRoll, 7.0, delta)
 
       // Animation selection matching banking roll (only during freefall)
       if (!this.isParachuteOpen) {
@@ -405,11 +441,11 @@ export default class Character {
       // Key commands dynamically guide pitch posture
       if (keys.forward && !keys.backward) {
         // W: Active forward dive posture
-        const diveTarget = this.isParachuteOpen ? 0.04 : 0.48
+        const diveTarget = this.isParachuteOpen ? 0.14 : 0.48
         this.aimPitch = THREE.MathUtils.damp(this.aimPitch, diveTarget, 6.0, delta)
       } else if (keys.backward && !keys.forward) {
         // S: Active pull-up flare posture (leaning back while backing up)
-        const flareTarget = this.isParachuteOpen ? -0.06 : -0.34
+        const flareTarget = this.isParachuteOpen ? -0.12 : -0.34
         this.aimPitch = THREE.MathUtils.damp(this.aimPitch, flareTarget, 6.0, delta)
       } else if (keys.space) {
         const spaceTarget = this.isParachuteOpen ? 0.05 : 0.58
@@ -447,26 +483,25 @@ export default class Character {
         this.model.rotation.x = THREE.MathUtils.lerp(Math.PI / 2, 0, openProg)
         this.model.rotation.z = 0 // Strictly zero Z-axis roll
 
-        targetFallSpeed = -4.5
-
-        // Parachute forward / backward / strafe
+        // Canopy glide (PUBG / BGMI style): W pushes forward and drops faster, S brakes and floats,
+        // A / D turn (handled above), SHIFT flares for a soft touchdown
+        targetForwardSpeed = this.chuteGlide.cruise
+        targetFallSpeed = this.chuteGlide.cruiseFall
         if (keys.forward && !keys.backward) {
-          targetForwardSpeed = 14.0 // W: Move forward swiftly under parachute
-          targetFallSpeed = -5.8
+          targetForwardSpeed = this.chuteGlide.push
+          targetFallSpeed = this.chuteGlide.pushFall
         } else if (keys.backward && !keys.forward) {
-          targetForwardSpeed = -4.5 // S: Back up / reverse under parachute
-          targetFallSpeed = -1.8
-        }
-
-        if (keys.left && !keys.right) {
-          targetStrafeSpeed = -7.0 // A: Strafe left
-        } else if (keys.right && !keys.left) {
-          targetStrafeSpeed = 7.0  // D: Strafe right
+          targetForwardSpeed = this.chuteGlide.brake
+          targetFallSpeed = this.chuteGlide.brakeFall
         }
 
         if (keys.shift) {
-          targetFallSpeed = -1.8 // Soft landing flare
+          targetForwardSpeed = Math.min(targetForwardSpeed, this.chuteGlide.brake)
+          targetFallSpeed = this.chuteGlide.flareFall
         }
+
+        // Slight outward slide while turning so turns feel carved rather than pivoting in place
+        targetStrafeSpeed = -keyTurnInput * 1.5
       } else {
         // High-altitude Wingsuit Freefall:
         if (keys.forward && !keys.backward) {
@@ -526,9 +561,7 @@ export default class Character {
       }
 
       // Character orientation: pitch, heading, roll
-      // When parachute is open, strictly zero Z-axis roll (no rotation on Z axis)
-      const currentRoll = this.isParachuteOpen ? 0 : this.rollAngle
-      this.group.rotation.set(this.pitchAngle, this.headingAngle, currentRoll, 'YXZ')
+      this.group.rotation.set(this.pitchAngle, this.headingAngle, this.rollAngle, 'YXZ')
 
       // ── Dynamic Web Audio Diving Wind Update ──────────────────────────────
       if (this.experience.audio) {
@@ -556,17 +589,20 @@ export default class Character {
       const altEl = document.getElementById('hud-alt')
       const distEl = document.getElementById('hud-target-dist')
 
-      // Automatic parachute deployment at altitude <= 150m
-      if (currentAlt <= 150.0 && !this.isParachuteOpen) {
-        this.isParachuteOpen = true
-        this.parachuteDeployTimer = 0
-        if (this.parachute) {
-          this.parachute.visible = true
-          this.parachute.scale.set(0.1, 0.1, 0.1)
-        }
-        // Audio: Play realistic canopy snap, inflation thump, and switch to gentle breeze
-        if (this.experience.audio) {
-          this.experience.audio.playParachuteDeploy()
+      // Parachute: player pulls with F / E once low enough; forced open at the safety altitude
+      if (!this.isParachuteOpen) {
+        const canPull = currentAlt <= this.chutePromptAlt
+        if (this.experience.hud) this.experience.hud.showChutePrompt(canPull)
+
+        if (canPull && controls.wasPressed('chute')) {
+          if (currentAlt <= this.chuteBonusAlt) {
+            this.chuteBonus = this.chuteBonusPoints
+            const popup = this.experience.world.rings
+            if (popup) popup._showCollectPopup(`+${this.chuteBonusPoints} PTS LOW PULL BONUS!`)
+          }
+          this._deployParachute()
+        } else if (currentAlt <= this.chuteAutoAlt) {
+          this._deployParachute()
         }
       }
 

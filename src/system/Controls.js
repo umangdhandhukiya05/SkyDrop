@@ -18,7 +18,13 @@ export default class Controls {
       isPointerLocked: false
     }
 
+    // Trackpad two-finger swipe / mouse wheel → free look (same as holding Alt)
+    this.wheel = { deltaX: 0, deltaY: 0 }
+
     this.isFlightActive = false
+
+    // One-shot actions pressed this frame (cleared every frame): 'chute', 'recenter', 'toggleControls'
+    this.pressed = new Set()
 
     this._onKeyDown = this._onKeyDown.bind(this)
     this._onKeyUp = this._onKeyUp.bind(this)
@@ -28,6 +34,7 @@ export default class Controls {
     this._onContextMenu = this._onContextMenu.bind(this)
     this._onPointerLockChange = this._onPointerLockChange.bind(this)
     this._onBlur = this._onBlur.bind(this)
+    this._onWheel = this._onWheel.bind(this)
 
     window.addEventListener('keydown', this._onKeyDown)
     window.addEventListener('keyup', this._onKeyUp)
@@ -36,6 +43,7 @@ export default class Controls {
     window.addEventListener('mousemove', this._onMouseMove)
     window.addEventListener('contextmenu', this._onContextMenu)
     window.addEventListener('blur', this._onBlur)
+    window.addEventListener('wheel', this._onWheel, { passive: false })
     document.addEventListener('pointerlockchange', this._onPointerLockChange)
   }
 
@@ -44,6 +52,15 @@ export default class Controls {
     if (!active) {
       this.exitPointerLock()
     }
+  }
+
+  // Must run within a user gesture's activation window (jump keypress / click)
+  requestPointerLock() {
+    if (this.mouse.isPointerLocked || !this.canvas.requestPointerLock) return
+    try {
+      const result = this.canvas.requestPointerLock()
+      if (result && result.catch) result.catch(() => {})
+    } catch (err) {}
   }
 
   exitPointerLock() {
@@ -59,6 +76,13 @@ export default class Controls {
   _onKeyDown(e) {
     const code = e.code || ''
     const key = (e.key || '').toLowerCase()
+
+    if (!e.repeat) {
+      if (code === 'KeyC' || key === 'c') this.pressed.add('recenter')
+      if (code === 'KeyH' || key === 'h') this.pressed.add('toggleControls')
+      if (code === 'KeyF' || code === 'KeyE' || key === 'f' || key === 'e') this.pressed.add('chute')
+    }
+    if (code === 'Space') e.preventDefault()
 
     if (code === 'KeyW' || code === 'ArrowUp' || key === 'w' || key === 'arrowup') {
       this.keys.forward = true
@@ -116,10 +140,8 @@ export default class Controls {
       this.mouse.isDown = true
 
       // During active flight, clicking canvas can request pointer lock for full immersive PUBG aim
-      if (this.isFlightActive && !this.mouse.isPointerLocked && e.target === this.canvas) {
-        try {
-          this.canvas.requestPointerLock()
-        } catch (err) {}
+      if (this.isFlightActive && e.target === this.canvas) {
+        this.requestPointerLock()
       }
     } else if (e.button === 2) {
       // Right click -> PUBG Free-Look
@@ -136,11 +158,24 @@ export default class Controls {
   }
 
   _onMouseMove(e) {
-    // Steer if pointer is locked or if mouse button is held down
-    if (this.mouse.isPointerLocked || this.mouse.isDown) {
+    // During flight, plain mouse / trackpad movement steers (no button needed);
+    // pointer lock just keeps the cursor from hitting the screen edge
+    if (this.isFlightActive || this.mouse.isPointerLocked || this.mouse.isDown) {
       this.mouse.deltaX += e.movementX || 0
       this.mouse.deltaY += e.movementY || 0
     }
+  }
+
+  _onWheel(e) {
+    if (!this.isFlightActive) return
+    e.preventDefault()
+
+    // Normalise line / page scrolling (mouse wheels) to pixels
+    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1
+    // Pinch / ctrl+scroll is swallowed (no zoom, and no browser page zoom mid-flight)
+    if (e.ctrlKey) return
+    this.wheel.deltaX += e.deltaX * unit
+    this.wheel.deltaY += e.deltaY * unit
   }
 
   _onContextMenu(e) {
@@ -156,9 +191,20 @@ export default class Controls {
     return { x: this.mouse.deltaX, y: this.mouse.deltaY }
   }
 
+  getWheelDelta() {
+    return this.wheel
+  }
+
+  wasPressed(action) {
+    return this.pressed.has(action)
+  }
+
   resetMouseDelta() {
     this.mouse.deltaX = 0
     this.mouse.deltaY = 0
+    this.wheel.deltaX = 0
+    this.wheel.deltaY = 0
+    this.pressed.clear()
   }
 
   destroy() {
@@ -169,6 +215,7 @@ export default class Controls {
     window.removeEventListener('mousemove', this._onMouseMove)
     window.removeEventListener('contextmenu', this._onContextMenu)
     window.removeEventListener('blur', this._onBlur)
+    window.removeEventListener('wheel', this._onWheel)
     document.removeEventListener('pointerlockchange', this._onPointerLockChange)
   }
 }

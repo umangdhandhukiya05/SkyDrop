@@ -13,10 +13,24 @@ export default class Camera {
 
     // Smooth interpolated look-at target to eliminate camera shaking
     this.currentLookTarget = new THREE.Vector3()
+    this.takeoffOffset = new THREE.Vector3()
 
     // PUBG 360° Free-Look offsets (when holding Alt or Right-Click)
     this.freeLookYaw = 0
     this.freeLookPitch = 0
+    this.orbitIdle = 0
+    this.orbitReturnDelay = 2.5
+    this.recentering = false
+    this.glideAngle = 0.5
+    this.chuteBlend = 0
+    this.chuteDistance = 15.0
+
+    // Chase distance behind the diver (freefall); canopy uses chuteDistance
+    this.followDistance = 5.2
+
+    // Camera punch (ring collect, chute snap) and speed-driven FOV
+    this.shake = 0
+    this.baseFov = 45
 
     this._createCamera()
     this._listenResize()
@@ -54,10 +68,13 @@ export default class Camera {
     if (mode === 'cinematic_takeoff') {
       if (world && world.plane) {
         this.currentLookTarget.copy(world.plane.group.position)
+        // Start the chase offset from wherever the menu camera currently is
+        this.takeoffOffset.subVectors(this.instance.position, world.plane.group.position)
       }
     } else if (mode === 'follow_skydiver') {
       this.freeLookYaw = 0
       this.freeLookPitch = 0
+      this.orbitIdle = this.orbitReturnDelay
 
       if (world && world.character) {
         const char = world.character
@@ -77,6 +94,10 @@ export default class Camera {
     }
   }
 
+  kick(amount) {
+    this.shake = Math.min(1.2, this.shake + amount)
+  }
+
   update() {
     const delta = this.experience.time.delta
     const world = this.experience.world
@@ -94,72 +115,128 @@ export default class Camera {
       this.instance.position.z = this.basePosition.z + Math.cos(t) * 0.12
       this.instance.lookAt(this.target)
     } else if (this.mode === 'cinematic_takeoff') {
-      // Smooth high-angle cinematic top view tracking plane acceleration
+      // High-angle chase locked to the plane. Only the framing offset is smoothed, so the plane
+      // stays centred even during the very fast climb (~200 m/s vertical) — lerping the absolute
+      // position used to leave the camera below the plane and lose it for several seconds.
       const planePos = plane.group.position
       const heading = plane.currentHeading !== undefined ? plane.currentHeading : plane.runwayHeading
 
       const takeoffProgress = Math.min(1.0, plane.flightTime / 3.0)
-      const topElevation = THREE.MathUtils.lerp(18.0, 38.0, takeoffProgress)
-      const trailOffset = THREE.MathUtils.lerp(6.0, 10.0, takeoffProgress)
+      const climbProgress = plane.state === 'roll' ? 0 : THREE.MathUtils.clamp(plane.airborneTime / 2.0, 0, 1)
+      const topElevation = THREE.MathUtils.lerp(18.0, 38.0, takeoffProgress) - climbProgress * 6.0
+      const trailOffset = THREE.MathUtils.lerp(6.0, 10.0, takeoffProgress) + climbProgress * 8.0
 
-      const desiredCamPos = new THREE.Vector3(
-        planePos.x - Math.sin(heading) * trailOffset,
-        planePos.y + topElevation,
-        planePos.z - Math.cos(heading) * trailOffset
+      const desiredOffset = new THREE.Vector3(
+        -Math.sin(heading) * trailOffset,
+        topElevation,
+        -Math.cos(heading) * trailOffset
       )
+      const smoothFactor = 1.0 - Math.exp(-4.0 * delta)
+      this.takeoffOffset.lerp(desiredOffset, smoothFactor)
+      this.instance.position.copy(planePos).add(this.takeoffOffset)
 
-      const smoothFactor = 1.0 - Math.exp(-6.0 * delta)
-      this.instance.position.lerp(desiredCamPos, smoothFactor)
-
-      const desiredLookTarget = new THREE.Vector3(
+      this.currentLookTarget.set(
         planePos.x + Math.sin(heading) * 6.0,
         planePos.y,
         planePos.z + Math.cos(heading) * 6.0
       )
-      this.currentLookTarget.lerp(desiredLookTarget, smoothFactor)
       this.instance.lookAt(this.currentLookTarget)
     } else if (this.mode === 'follow_skydiver') {
       const charPos = character.group.position
 
-      // ── PUBG 360° Free-Look (Alt / RMB) Handling ───────────────────────────
-      if (controls && controls.keys.freeLook) {
-        const mouseDelta = controls.getMouseDelta()
-        this.freeLookYaw -= mouseDelta.x * 0.003
-        this.freeLookPitch = THREE.MathUtils.clamp(
-          this.freeLookPitch + mouseDelta.y * 0.0025,
-          -0.95,
-          0.95
-        )
-      } else {
-        // Smoothly spring camera back behind character heading when Free-Look is released
-        this.freeLookYaw = THREE.MathUtils.damp(this.freeLookYaw, 0, 8.0, delta)
-        this.freeLookPitch = THREE.MathUtils.damp(this.freeLookPitch, 0, 8.0, delta)
+      // ── 360° Orbit Look ───────────────────────────────────────────────────
+      // Sources: trackpad two-finger swipe / mouse wheel, or Alt / RMB + mouse move.
+      // The view holds where you leave it, then eases back behind the diver after a pause (C recenters now).
+      let orbitInput = false
+      if (controls) {
+        const wheel = controls.getWheelDelta()
+        if (wheel.deltaX !== 0 || wheel.deltaY !== 0) {
+          this.freeLookYaw += wheel.deltaX * 0.004
+          this.freeLookPitch += wheel.deltaY * 0.003
+          orbitInput = true
+        }
+        if (controls.keys.freeLook) {
+          const mouseDelta = controls.getMouseDelta()
+          this.freeLookYaw -= mouseDelta.x * 0.004
+          this.freeLookPitch += mouseDelta.y * 0.003
+          orbitInput = true
+        }
+        // C: swing the view straight back behind the diver
+        if (controls.wasPressed('recenter')) {
+          this.recentering = true
+        }
+      }
+      if (orbitInput) this.recentering = false
+      if (this.recentering) {
+        this.freeLookYaw = THREE.MathUtils.damp(this.freeLookYaw, 0, 10.0, delta)
+        this.freeLookPitch = THREE.MathUtils.damp(this.freeLookPitch, 0, 10.0, delta)
+        if (Math.abs(this.freeLookYaw) < 0.001 && Math.abs(this.freeLookPitch) < 0.001) this.recentering = false
+      }
+      // Keep the orbit continuous without unbounded growth
+      this.freeLookYaw = THREE.MathUtils.euclideanModulo(this.freeLookYaw + Math.PI, Math.PI * 2) - Math.PI
+      this.freeLookPitch = THREE.MathUtils.clamp(this.freeLookPitch, -0.9, 1.3)
+
+      this.orbitIdle = orbitInput ? 0 : this.orbitIdle + delta
+      if (this.orbitIdle >= this.orbitReturnDelay) {
+        this.freeLookYaw = THREE.MathUtils.damp(this.freeLookYaw, 0, 2.5, delta)
+        this.freeLookPitch = THREE.MathUtils.damp(this.freeLookPitch, 0, 2.5, delta)
       }
 
       // Camera coordinates synchronized directly with character heading and dive pitch
       const totalYaw = character.headingAngle + this.freeLookYaw
-      const flightPitch = (character.state === 'landed') ? 0.0 : character.pitchAngle
+      // Sit a little above the actual descent line so the path ahead (and the rings on it)
+      // shows just below the diver instead of off the bottom of the screen
+      const v = character.velocity
+      const glideAngle = character.state === 'landed'
+        ? 0
+        : Math.atan2(-v.y, Math.max(Math.hypot(v.x, v.z), 0.5))
+      this.glideAngle = THREE.MathUtils.damp(this.glideAngle, THREE.MathUtils.clamp(glideAngle, 0, 1.2), 3.0, delta)
+      // Under canopy pull back and look a little higher so the whole parachute stays framed (PUBG-style)
+      this.chuteBlend = THREE.MathUtils.damp(
+        this.chuteBlend,
+        character.isParachuteOpen && character.state !== 'landed' ? 1 : 0,
+        2.5,
+        delta
+      )
+      // Freefall: ride just above the descent line. Canopy: flatter PUBG-style chase from behind.
+      const basePitch = THREE.MathUtils.lerp(this.glideAngle + 0.18, 0.22, this.chuteBlend)
       const totalPitch = THREE.MathUtils.clamp(
-        flightPitch * 0.45 + this.freeLookPitch + 0.16,
+        basePitch + this.freeLookPitch,
         -0.85,
-        1.1
+        1.45
       )
 
-      // Distance from character: 5.2m in flight, 4.0m on landing
-      const dist = (character.state === 'landed') ? 4.0 : 5.2
+      const flightDist = THREE.MathUtils.lerp(this.followDistance, this.chuteDistance, this.chuteBlend)
+      const dist = (character.state === 'landed') ? 4.0 : flightDist
 
       const cosP = Math.cos(totalPitch)
       const sinP = Math.sin(totalPitch)
 
       const camX = charPos.x - Math.sin(totalYaw) * cosP * dist
-      const camY = charPos.y + sinP * dist + 1.45
+      // Never dip the camera below the island surface when looking up from underneath
+      const camY = Math.max(charPos.y + sinP * dist + 1.45, 24.0)
       const camZ = charPos.z - Math.cos(totalYaw) * cosP * dist
 
       this.instance.position.set(camX, camY, camZ)
 
       // Target character center of mass (chest level)
-      const targetY = charPos.y + 0.85
+      const targetY = charPos.y + 0.85 + this.chuteBlend * 2.6
       this.instance.lookAt(charPos.x, targetY, charPos.z)
+
+      // Speed sensation: widen FOV as velocity climbs
+      const speed = character.state === 'landed' ? 0 : character.velocity.length()
+      const targetFov = this.baseFov + THREE.MathUtils.clamp((speed - 12) / 26, 0, 1) * 16
+      this.instance.fov = THREE.MathUtils.damp(this.instance.fov, targetFov, 3.0, delta)
+      this.instance.updateProjectionMatrix()
+    }
+
+    // Decaying camera shake
+    if (this.shake > 0.001) {
+      const s = this.shake * 0.12
+      this.instance.position.x += (Math.random() - 0.5) * s
+      this.instance.position.y += (Math.random() - 0.5) * s
+      this.instance.position.z += (Math.random() - 0.5) * s
+      this.shake = THREE.MathUtils.damp(this.shake, 0, 6.0, delta)
     }
   }
 }

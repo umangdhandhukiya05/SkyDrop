@@ -6,6 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="SkyDrop — 3D skydiving precision landing game" />
     <title>SKYDROP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap" />
   </head>
   <body>
     <!-- Initial Loading screen -->
@@ -31,6 +34,16 @@
           <button id="start-button" class="start-btn">START</button>
         </div>
       </div>
+
+      <!-- Automatic jump countdown over the rings -->
+      <div id="jump-prompt" class="action-prompt jump">
+        <span>JUMPING IN <span id="jump-prompt-count" class="prompt-key">3</span></span>
+        <small>Get ready: glide through the glowing rings</small>
+        <div class="prompt-timer"><div id="jump-prompt-bar" class="prompt-timer-bar"></div></div>
+      </div>
+
+      <!-- Ring collect flash -->
+      <div id="screen-flash" class="screen-flash"></div>
 
       <!-- Ring Collection Floating Alert -->
       <div id="ring-popup" class="ring-popup">+10 PTS RING COLLECTED!</div>
@@ -61,21 +74,56 @@
             <span class="alt-label">ALTITUDE</span>
             <span id="hud-alt" class="alt-val">--- m</span>
           </div>
+          <div class="alt-indicator">
+            <span class="alt-label">SPEED</span>
+            <span id="hud-speed" class="alt-val">--- km/h</span>
+          </div>
+          <div class="alt-indicator">
+            <span class="alt-label">SCORE</span>
+            <span id="hud-score" class="alt-val score-val">0 PTS</span>
+          </div>
           <div class="rings-indicator">
             <span class="rings-label">DIVING RINGS</span>
             <span id="hud-rings" class="rings-val">0 / 3 (+0 PTS)</span>
           </div>
         </div>
 
+        <!-- Context hint -->
+        <div id="hud-hint" class="hud-hint"></div>
+
+        <!-- Screen-space guide markers -->
+        <div id="ring-marker" class="guide-marker ring">
+          <div class="marker-arrow"></div>
+          <div class="marker-icon"></div>
+          <span class="marker-label">NEXT RING</span>
+          <span class="marker-dist">--- m</span>
+        </div>
+        <div id="target-marker" class="guide-marker target">
+          <div class="marker-arrow"></div>
+          <div class="marker-icon"></div>
+          <span class="marker-label">LANDING</span>
+          <span class="marker-dist">--- m</span>
+        </div>
+
+        <!-- Parachute pull prompt -->
+        <div id="chute-prompt" class="action-prompt chute">
+          <span class="prompt-key">F</span> PULL PARACHUTE
+          <small>Pull below 250 m for a bonus</small>
+        </div>
+
         <!-- Bottom-Left Controls Guide Card -->
-        <div class="hud-controls-card">
+        <div id="hud-controls-card" class="hud-controls-card">
+          <div class="hud-controls-collapsed"><span class="key-badge">H</span> Show Controls</div>
           <div class="hud-keys">
-            <div><span class="key-badge">MOUSE / DRAG</span> Steer & Aim Flight (PUBG)</div>
-            <div><span class="key-badge">W / S</span> Move Forward / Move Backward</div>
-            <div><span class="key-badge">A / D</span> Strafe & Turn Left / Right</div>
-            <div><span class="key-badge">ALT / RMB</span> 360° Free Look (Hold)</div>
-            <div><span class="key-badge">SPACE / SHIFT</span> Fast Dive / Float Airbrake</div>
-            <div><span class="key-badge">M</span> Toggle Sound (Mute / Unmute)</div>
+            <div><span class="key-badge">MOUSE / TRACKPAD</span> Steer &amp; Aim (click to capture)</div>
+            <div><span class="key-badge">ALT / RMB / 2-FINGER SWIPE</span> Free Look</div>
+            <div><span class="key-badge">C</span> Recenter Camera</div>
+            <div><span class="key-badge">W / S</span> Forward / Back (Canopy: Speed Up / Brake)</div>
+            <div><span class="key-badge">A / D</span> Turn Left / Right</div>
+            <div><span class="key-badge">SPACE / SHIFT</span> Fast Dive / Slow Float (Canopy: Flare)</div>
+            <div><span class="key-badge">F</span> Pull Parachute (below 400 m)</div>
+            <div><span class="key-badge">M</span> Sound On / Off</div>
+            <div><span class="key-badge">H</span> Hide Controls</div>
           </div>
         </div>
       </div>

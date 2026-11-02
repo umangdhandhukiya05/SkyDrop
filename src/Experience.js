@@ -7,6 +7,7 @@ import Loader from './system/Loader.js'
 import Controls from './system/Controls.js'
 import Physics from './system/Physics.js'
 import AudioManager from './system/AudioManager.js'
+import Hud from './system/Hud.js'
 import World from './world/World.js'
 
 export default class Experience {
@@ -48,6 +49,9 @@ export default class Experience {
     // Renderer
     this.renderer = new Renderer(this)
 
+    // Screen-space guidance HUD
+    this.hud = new Hud(this)
+
     // World
     this.world = new World(this)
 
@@ -61,6 +65,7 @@ export default class Experience {
     // World (plane & character movement) MUST update FIRST so camera follows the current frame position with zero lag
     this.world.update()
     this.camera.update()
+    this.hud.update()
     this.renderer.update()
 
     if (this.controls) this.controls.resetMouseDelta()
