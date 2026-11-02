@@ -7,6 +7,7 @@ import Rings from './Rings.js'
 import Clouds from './Clouds.js'
 import WindStreaks from './WindStreaks.js'
 import ZignutsSign from './ZignutsSign.js'
+import AirportPlanes from './AirportPlanes.js'
 
 export default class World {
   constructor(experience) {
@@ -31,6 +32,9 @@ export default class World {
 
     // Aircraft at start of long runway
     this.plane = new Plane(experience)
+
+    // Colorful airport planes on both sides of runway
+    this.airportPlanes = new AirportPlanes(experience)
 
     // Character
     this.character = new Character(experience)
@@ -128,6 +132,7 @@ export default class World {
     if (this.zignutsSign) this.zignutsSign.update()
     if (this.clouds) this.clouds.update(delta)
     if (this.plane) this.plane.update(delta)
+    if (this.airportPlanes) this.airportPlanes.update(delta)
     if (this.character) this.character.update(delta)
     if (this.windStreaks && this.character) this.windStreaks.update(delta, this.character)
     // Only track ring hits/misses while actually skydiving (runway position would mark them all missed)
