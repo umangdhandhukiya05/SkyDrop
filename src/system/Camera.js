@@ -23,7 +23,8 @@ export default class Camera {
     this.recentering = false
     this.glideAngle = 0.5
     this.chuteBlend = 0
-    this.chuteDistance = 15.0
+    this.chuteDistance = 13.5
+    this.chutePitch = 0 // Vertical pitch angle under canopy (controllable via mouse / trackpad)
 
     // Chase distance behind the diver (freefall); canopy uses chuteDistance
     this.followDistance = 5.2
@@ -74,6 +75,8 @@ export default class Camera {
     } else if (mode === 'follow_skydiver') {
       this.freeLookYaw = 0
       this.freeLookPitch = 0
+      this.chutePitch = 0
+      this.chuteBlend = 0
       this.orbitIdle = this.orbitReturnDelay
 
       if (world && world.character) {
@@ -144,24 +147,46 @@ export default class Camera {
     } else if (this.mode === 'follow_skydiver') {
       const charPos = character.group.position
 
-      // ── 360° Orbit Look ───────────────────────────────────────────────────
-      // Sources: trackpad two-finger swipe / mouse wheel, or Alt / RMB + mouse move.
-      // The view holds where you leave it, then eases back behind the diver after a pause (C recenters now).
+      // ── 360° Orbit Look & Vertical Pitch Control ─────────────────────────
+      // In canopy flight, vertical mouse movement directly pitches the camera downwards
+      // to easily spot and line up the landing target and rings.
       let orbitInput = false
       if (controls) {
+        const mouseDelta = controls.getMouseDelta()
         const wheel = controls.getWheelDelta()
+
+        // Two-finger swipe / wheel adjusts look orbit
         if (wheel.deltaX !== 0 || wheel.deltaY !== 0) {
           this.freeLookYaw += wheel.deltaX * 0.004
-          this.freeLookPitch += wheel.deltaY * 0.003
+          if (character.isParachuteOpen) {
+            this.chutePitch += wheel.deltaY * 0.003
+            this.chutePitch = THREE.MathUtils.clamp(this.chutePitch, -0.65, 0.95)
+          } else {
+            this.freeLookPitch += wheel.deltaY * 0.003
+          }
           orbitInput = true
         }
+
         if (controls.keys.freeLook) {
-          const mouseDelta = controls.getMouseDelta()
+          // Alt / RMB Free Look: yaw orbits around character without turning character heading
           this.freeLookYaw -= mouseDelta.x * 0.004
-          this.freeLookPitch += mouseDelta.y * 0.003
+          if (character.isParachuteOpen) {
+            this.chutePitch += mouseDelta.y * 0.0035
+            this.chutePitch = THREE.MathUtils.clamp(this.chutePitch, -0.65, 0.95)
+          } else {
+            this.freeLookPitch += mouseDelta.y * 0.003
+          }
           orbitInput = true
+        } else if (character.isParachuteOpen && character.state !== 'landed') {
+          // Normal mouse look under canopy: vertical mouse movement directly pitches the camera
+          // downward to clearly target the bullseye and island ground below
+          if (Math.abs(mouseDelta.y) > 0.05) {
+            this.chutePitch += mouseDelta.y * 0.0035
+            this.chutePitch = THREE.MathUtils.clamp(this.chutePitch, -0.65, 0.95)
+          }
         }
-        // C: swing the view straight back behind the diver
+
+        // C: swing the view straight back behind the diver and reset pitch
         if (controls.wasPressed('recenter')) {
           this.recentering = true
         }
@@ -170,7 +195,10 @@ export default class Camera {
       if (this.recentering) {
         this.freeLookYaw = THREE.MathUtils.damp(this.freeLookYaw, 0, 10.0, delta)
         this.freeLookPitch = THREE.MathUtils.damp(this.freeLookPitch, 0, 10.0, delta)
-        if (Math.abs(this.freeLookYaw) < 0.001 && Math.abs(this.freeLookPitch) < 0.001) this.recentering = false
+        this.chutePitch = THREE.MathUtils.damp(this.chutePitch, 0, 10.0, delta)
+        if (Math.abs(this.freeLookYaw) < 0.001 && Math.abs(this.freeLookPitch) < 0.001 && Math.abs(this.chutePitch) < 0.001) {
+          this.recentering = false
+        }
       }
       // Keep the orbit continuous without unbounded growth
       this.freeLookYaw = THREE.MathUtils.euclideanModulo(this.freeLookYaw + Math.PI, Math.PI * 2) - Math.PI
@@ -182,6 +210,10 @@ export default class Camera {
         this.freeLookPitch = THREE.MathUtils.damp(this.freeLookPitch, 0, 2.5, delta)
       }
 
+      if (character.state === 'landed') {
+        this.chutePitch = THREE.MathUtils.damp(this.chutePitch, 0, 4.0, delta)
+      }
+
       // Camera coordinates synchronized directly with character heading and dive pitch
       const totalYaw = character.headingAngle + this.freeLookYaw
       // Sit a little above the actual descent line so the path ahead (and the rings on it)
@@ -191,19 +223,19 @@ export default class Camera {
         ? 0
         : Math.atan2(-v.y, Math.max(Math.hypot(v.x, v.z), 0.5))
       this.glideAngle = THREE.MathUtils.damp(this.glideAngle, THREE.MathUtils.clamp(glideAngle, 0, 1.2), 3.0, delta)
-      // Under canopy pull back and look a little higher so the whole parachute stays framed (PUBG-style)
+      // Under canopy pull back and frame parachute while keeping the island / target clearly in view
       this.chuteBlend = THREE.MathUtils.damp(
         this.chuteBlend,
         character.isParachuteOpen && character.state !== 'landed' ? 1 : 0,
         2.5,
         delta
       )
-      // Freefall: ride just above the descent line. Canopy: flatter PUBG-style chase from behind.
-      const basePitch = THREE.MathUtils.lerp(this.glideAngle + 0.18, 0.22, this.chuteBlend)
+      // Freefall: ride just above the descent line. Canopy: angled down toward the target (~27° default) + player pitch.
+      const basePitch = THREE.MathUtils.lerp(this.glideAngle + 0.18, 0.48, this.chuteBlend)
       const totalPitch = THREE.MathUtils.clamp(
-        basePitch + this.freeLookPitch,
-        -0.85,
-        1.45
+        basePitch + this.freeLookPitch + this.chutePitch,
+        -0.45,
+        1.42
       )
 
       const flightDist = THREE.MathUtils.lerp(this.followDistance, this.chuteDistance, this.chuteBlend)
@@ -219,8 +251,8 @@ export default class Camera {
 
       this.instance.position.set(camX, camY, camZ)
 
-      // Target character center of mass (chest level)
-      const targetY = charPos.y + 0.85 + this.chuteBlend * 2.6
+      // Target character center of mass (chest level, keeping island and target framed ahead)
+      const targetY = charPos.y + 0.85 + this.chuteBlend * 0.45
       this.instance.lookAt(charPos.x, targetY, charPos.z)
 
       // Speed sensation: widen FOV as velocity climbs

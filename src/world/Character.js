@@ -384,11 +384,12 @@ export default class Character {
           this.headingAngle -= mouseDelta.x * mouseSens
         }
 
-        // Expanded vertical pitch limits for effortless ring targeting (Mouse Y)
-        if (Math.abs(mouseDelta.y) > 0.05) {
+        // Vertical pitch limits for ring targeting in freefall (Mouse Y)
+        // Under canopy, vertical mouse movement is handled by Camera to pitch view downwards at target
+        if (!this.isParachuteOpen && Math.abs(mouseDelta.y) > 0.05) {
           const pitchSens = 0.0022
-          const minPitch = this.isParachuteOpen ? -0.22 : -0.48 // Up to ~27.5° flare / climb
-          const maxPitch = this.isParachuteOpen ? 0.30 : 0.65   // Up to ~37.2° steep dive
+          const minPitch = -0.48 // Up to ~27.5° flare / climb
+          const maxPitch = 0.65   // Up to ~37.2° steep dive
 
           if (this.aimPitch === undefined) this.aimPitch = this.pitchAngle || 0.08
           this.aimPitch = THREE.MathUtils.clamp(
