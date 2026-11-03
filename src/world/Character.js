@@ -318,7 +318,12 @@ export default class Character {
 
     const totalScore = landingPoints + ringPoints + this.chuteBonus
 
-    if (ringsCollected === totalRings && landingPoints === 50) {
+    const isTargetMissed = landingPoints === 0 || distToCenter > 54.0
+    const isGameOver = isTargetMissed || !this.isParachuteOpen
+
+    if (isGameOver) {
+      rating = isTargetMissed ? 'TARGET MISSED' : 'GAME OVER'
+    } else if (ringsCollected === totalRings && landingPoints === 50) {
       rating = 'LEGENDARY MASTER!'
     } else if (landingPoints === 50) {
       rating = 'PERFECT BULLSEYE!'
@@ -333,10 +338,13 @@ export default class Character {
       ringsCollected,
       rating,
       ringName,
-      distance: distToCenter.toFixed(1)
+      distance: distToCenter.toFixed(1),
+      isGameOver,
+      isTargetMissed
     }
 
     const scoreOverlay = document.getElementById('score-overlay')
+    const scoreCard = document.getElementById('score-card')
     const scorePointsEl = document.getElementById('score-points')
     const scoreRatingEl = document.getElementById('score-rating')
     const scoreRingsDetailEl = document.getElementById('score-rings-detail')
@@ -351,8 +359,29 @@ export default class Character {
           (this.chuteBonus ? `  ·  Low Pull Bonus (+${this.chuteBonus} PTS)` : '')
       }
       if (scoreDistEl) {
-        scoreDistEl.innerText = `Landing: ${distToCenter.toFixed(1)}m from center (${ringName}) (+${landingPoints} PTS)`
+        scoreDistEl.innerText = isTargetMissed
+          ? `Landing: ${distToCenter.toFixed(1)}m from center (${ringName}) — Target Missed!`
+          : `Landing: ${distToCenter.toFixed(1)}m from center (${ringName}) (+${landingPoints} PTS)`
       }
+
+      if (scoreCard) {
+        if (isGameOver) {
+          scoreCard.classList.add('missed-target')
+        } else {
+          scoreCard.classList.remove('missed-target')
+        }
+      }
+
+      // Show celebration ribbon on successful game completion; hide on target missed or game over
+      if (this.experience.celebration) {
+        if (!isGameOver) {
+          const ribbonText = landingPoints === 50 ? 'PERFECT BULLSEYE' : 'CELEBRATION'
+          this.experience.celebration.show(ribbonText)
+        } else {
+          this.experience.celebration.hide()
+        }
+      }
+
       scoreOverlay.classList.add('visible')
     }
 
@@ -615,11 +644,12 @@ export default class Character {
         this.state = 'landed'
         this.velocity.set(0, 0, 0)
 
-        // Audio: Stop diving wind and play ground touchdown impact & victory fanfare
+        // Audio: Stop diving wind and play ground touchdown impact & victory fanfare (only if target hit)
         if (this.experience.audio) {
           this.experience.audio.stopDivingWind(0.25)
           const isBullseye = (distToTarget <= 5.0)
-          this.experience.audio.playTouchdown(isBullseye)
+          const isTargetHit = (distToTarget <= 54.0 && this.isParachuteOpen)
+          this.experience.audio.playTouchdown(isBullseye, isTargetHit)
         }
 
         if (this.experience.controls) {

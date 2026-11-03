@@ -46,6 +46,9 @@ if (startBtn) {
 
 if (restartBtn) {
   restartBtn.addEventListener('click', () => {
+    if (experience.celebration) {
+      experience.celebration.hide()
+    }
     window.location.reload()
   })
 }

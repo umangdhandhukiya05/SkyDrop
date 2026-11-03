@@ -54,6 +54,10 @@ export default class World {
     this.sequenceTimer = 0
     this.cruiseTimer = 0
 
+    if (this.experience.celebration) {
+      this.experience.celebration.hide()
+    }
+
     // Rings are laid out once the drop run is known (see cruise below)
     if (this.rings) {
       this.rings.clear()

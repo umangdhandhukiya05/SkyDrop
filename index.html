@@ -130,7 +130,23 @@
 
       <!-- Landing Score & Target Result Modal -->
       <div id="score-overlay">
-        <div class="score-card">
+        <!-- Falling Celebration Ribbons & Streamers Canvas -->
+        <canvas id="celebration-canvas" class="celebration-canvas"></canvas>
+
+        <div id="score-card" class="score-card">
+          <!-- 3D Celebration Ribbon Banner (shown on game complete, hidden on target miss / game over) -->
+          <div id="celebration-ribbon" class="celebration-ribbon hidden">
+            <div class="ribbon-tail left"></div>
+            <div class="ribbon-fold left"></div>
+            <div class="ribbon-banner">
+              <span class="ribbon-icon">🎉</span>
+              <span id="ribbon-text" class="ribbon-text">CELEBRATION</span>
+              <span class="ribbon-icon">🎉</span>
+            </div>
+            <div class="ribbon-fold right"></div>
+            <div class="ribbon-tail right"></div>
+          </div>
+
           <div id="score-rating" class="score-rating">PERFECT BULLSEYE!</div>
           <div id="score-points" class="score-points">80 PTS</div>
           <div id="score-rings-detail" class="score-rings-detail">Rings Collected: 0 / 3 (+0 PTS)</div>

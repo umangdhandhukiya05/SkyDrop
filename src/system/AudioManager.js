@@ -518,7 +518,7 @@ export default class AudioManager {
   // ═════════════════════════════════════════════════════════════════════════
   // 6. TOUCHDOWN IMPACT & LANDING CELEBRATION
   // ═════════════════════════════════════════════════════════════════════════
-  playTouchdown(isBullseye = false) {
+  playTouchdown(isBullseye = false, isTargetHit = true) {
     const ctx = this.ensureContext()
     if (!ctx) return
 
@@ -561,11 +561,44 @@ export default class AudioManager {
       scuffSrc.stop(now + 0.24)
     }
 
-    // 3. Victory Landing Fanfare (when landing on target or bullseye!)
-    setTimeout(() => {
-      if (!this.ctx) return
-      this._playLandingFanfare(isBullseye)
-    }, 280)
+    // 3. Victory Landing Fanfare (ONLY when landing on target!)
+    if (isTargetHit) {
+      setTimeout(() => {
+        if (!this.ctx) return
+        this._playLandingFanfare(isBullseye)
+      }, 280)
+    } else {
+      // Subdued tone for target miss / game over
+      setTimeout(() => {
+        if (!this.ctx) return
+        this._playMissTone()
+      }, 280)
+    }
+  }
+
+  _playMissTone() {
+    if (!this.ctx) return
+    const now = this.ctx.currentTime
+
+    const osc = this.ctx.createOscillator()
+    osc.type = 'sawtooth'
+    osc.frequency.setValueAtTime(140, now)
+    osc.frequency.exponentialRampToValueAtTime(65, now + 0.45)
+
+    const filter = this.ctx.createBiquadFilter()
+    filter.type = 'lowpass'
+    filter.frequency.setValueAtTime(280, now)
+
+    const gain = this.ctx.createGain()
+    gain.gain.setValueAtTime(0.22, now)
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45)
+
+    osc.connect(filter)
+    filter.connect(gain)
+    gain.connect(this.masterGain)
+
+    osc.start(now)
+    osc.stop(now + 0.5)
   }
 
   _playLandingFanfare(isBullseye) {

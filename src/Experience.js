@@ -8,6 +8,7 @@ import Controls from './system/Controls.js'
 import Physics from './system/Physics.js'
 import AudioManager from './system/AudioManager.js'
 import Hud from './system/Hud.js'
+import Celebration from './system/Celebration.js'
 import World from './world/World.js'
 
 export default class Experience {
@@ -51,6 +52,9 @@ export default class Experience {
 
     // Screen-space guidance HUD
     this.hud = new Hud(this)
+
+    // Celebration system (ribbon banner & falling celebratory streamers)
+    this.celebration = new Celebration(this)
 
     // World
     this.world = new World(this)
